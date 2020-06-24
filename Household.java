@@ -1,618 +1,542 @@
 package rwh;
 
+import sim.engine.SimState;
+import sim.engine.Steppable;
+
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.PrintWriter;
+import java.util.Random;
+import java.util.Scanner;
+import java.util.stream.IntStream;
 
 
-public class Household {
-	/*Index value of household in the model */
-	public int index;
-	/*Catchment area of rainwater harvesting system [ft^2] */
-	public double catchmentArea;
-	/*Rainwater storage tank diameter [m] - Cylindrical Tank */
-	public double tankDiameter;
-	/*Rainwater storage tank height [m] - Cylindrical Tank */
-	public double tankHeight;
-	/*Rainwater tank storage volume [gal] */
-	public double tankStorageVolume;
-	/*First flush diversion coefficient - [0.00-1.00] (0.10 standard value) - Applies to single rain event - Not currently used */
-	//public double firstFlushDiversionCoefficient = 0.10;
-	
-	/*EPANET Node ID for household negative demand node */
-	public String negativeDemandNodeID;
-	/*EPANET Node ID for household irrigation demand node */
-	public String irrigationDemandNodeID;
-	/*EPANET Node ID for household main system node */
-	public String mainSystemNodeID;
+public class market implements Steppable {
 
-	/*Current hour of month [0-720] */
-	public int currentHour = 0;
-	/*Current day of year [0-30] */
-	public int currentDay = 0;
-    
-	/*Number of hours in month (April) */
-    public int hoursInMonth = 720;
-    /*Number of days in month (April) */
-    public int daysInMonth = 30;
-    
-    //Willingness to accept value
-    public double WTA = 0.0;
-    //Willingness to pay value
-    public double WTP = 0.0;
-    
-    /*Global irrigation demand pattern [gal] */
-    public double[] theoreticalIrrigationDemand = new double[this.hoursInMonth];
-    /*Household irrigation demand for the current hour [gal] */
-    public double[] irrigationDemand = new double[this.hoursInMonth];
-    /*Total household demand for the current hour [gal] */
-    public double[] totalDemand = new double[this.hoursInMonth];
-    
-    /*Daily maximum temperature [degrees F]??? */
-    public double[] dailyMaxTemperature = new double[this.daysInMonth];
-    
-    /*Rainfall during current hour [in] */
-    public double[] hourlyRainfall = new double[this.hoursInMonth];
-    /*Total hourly rainfall volume [gal] */
-    public double[] totalHourlyRainfallVolume = new double[this.hoursInMonth];
-    /*First flush diversion volume for current hour [gal] */
-    public double[] firstFlushDiversionVolume = new double[this.hoursInMonth];
-    /*Rainfall volume to storage tank [gal] */
-    public double[] rainfallToTankVolume = new double[this.hoursInMonth];
-    /*Storage overflow volume from rainfall during the current hour [gal] */
-    public double[] rainfallOverflowVolume = new double[this.hoursInMonth];
-    /*Storage overflow volume from rainfall sent to infiltration bore during the current hour [gal] */
-    public double[] rainfallToInfiltrationVolume = new double[this.hoursInMonth];
-    /*Storage overflow volume from rainfall sent to storm drain during the current hour [gal]  */
-    public double[] rainfallToStormDrainVolume = new double[this.hoursInMonth];
-    
-    /*Number of hours between rainfall events before first flush diversion can be reactivated */
-    public int flushDiversionRainfallGap = 2;
-    /*Boolean flag container to determine if there was rainfall within the number of hours indicated by flush diversion steps */
-    public boolean[] rainfallWithinGapFlag = new boolean[this.hoursInMonth];
-    /*Number of hours that must go by after a rain event before trade activity resumes */
-    public int rainTradeGap = 48;
-    /*Number of hours since the last rain event */
-    public int[] hoursSinceLastRainEvent = new int[this.hoursInMonth];
-    /*First flush diversion volumetric requirement [gal] */
-    public double flushDiversionRequirement = 75.0;
-    
-    /*Tank storage volume at the beginning of the current hour [gal] */
-    public double[] storageVolumeBeginInterval = new double[this.hoursInMonth];
-    /*Tank storage volume for household demand during the current hour [gal] */
-    public double[] storageVolumeForHouseholdDemand = new double[this.hoursInMonth];
-    /*Tank storage volume after discharge for household demand [gal] */
-    public double[] storageVolumeAfterHouseholdDemand = new double[this.hoursInMonth];
-    /*Tank storage volume to be sent to reclaimed pipeline for rwh.market settlement during the current hour [gal] */
-    public double[] storageVolumeForMarket = new double[this.hoursInMonth];
-    /*Tank storage volume to be sent to reclaimed pipeline for utility settlement during the current hour [gal] */
-    public double[] storageVolumeForUtility = new double[this.hoursInMonth];
-    /*Total tank storage volume to be sent to reclaimed pipeline during the current hour [gal] */
-    public double[] totalStorageVolumeToMainSystem = new double[this.hoursInMonth];
-    /*Flow rate from tank to main system [gpm] */
-    public double[] flowrateFromTankToMainSystem = new double[this.hoursInMonth];
-    /*Tank storage volume after tank discharge for current hour [gal] */
-    public double[] storageVolumeAfterDischarge = new double[this.hoursInMonth];
-    
-    ////////////////////////////////////////////////////////////////////////////
-    
-    /*Scheduled tank discharges [gal] - [hour scheduled][hours ahead] */
-    public double[][] storageDischargeSchedule = new double[this.hoursInMonth][6];
-    /*Maximum tank discharge for any given hour [gal] - This should actually be determined by the chosen pump curve */
-    public double[] maximumHourlyDischarge = new double[this.hoursInMonth];
-    
-    ////////////////////////////////////////////////////////////////////////////
 
-    /*Tank storage level at the beginning of the current hour [m] */
-    public double[] tankLevelBeginInterval = new double[this.hoursInMonth];
-    /*Tank storage level after discharge for household demand [m] */
-    public double[] tankLevelAfterHouseholdDemand = new double[this.hoursInMonth];
-    /*Tank storage level after discharge for current hour [m] */
-    public double[] tankLevelAfterDischarge = new double[this.hoursInMonth];
-    
-    public double tankLevelFinal;
-    
-    /*Pressure of the negative demand node at beginning of current hour [psi] - Passed from EPANET at beginning of current hour */
-    public double[] pressureNegativeDemandNode = new double[this.hoursInMonth];
-    /*Pressure of the main system demand node at beginning of current hour [psi] - Passed from EPANET at beginning of current hour */
-    public double[] pressureMainSystemNode = new double[this.hoursInMonth];
-    /*Pressure of the irrigation demand node at beginning of current hour [psi] - Passed from EPANET at beginning of current hour */
-    public double[] pressureIrrigationDemandNode = new double[this.hoursInMonth];
-    /*Estimated pressure of negative demand node with flow from storage tank [psi] */
-    public double[] pressureEstimateNegativeDemandNode = new double[this.hoursInMonth];
-    /*Estimated pressure of main system node with flow from storage tank [psi] */
-    public double[] pressureEstimateMainSystemNode = new double[this.hoursInMonth];
-    /*Estimated pressure of irrigation demand node with flow from storage tank [psi] */
-    public double[] pressureEstimateIrrigationDemandNode = new double[this.hoursInMonth];
+    /* Current hour of simulation */
+    public int currentHour = 0;
+    /* Current day of year */
+    public int currentDay = 0;
 
-	/*Flag for rainwater harvesting tank system existence */
-    public boolean hasTank;
-	
-	//Default range is 17-22
-	/*Discharge Start Time - For Predefined Storage Method only */ 
-	public int startDischarge = 17;
-	/*Discharge Stop Time - For Predefined Storage Method only */
-	public int stopDischarge = 22;
+    //An array to contain the households
+    public Household[] households;
 
-	//Storage remaining at the end of simulation
-	public double finalStorage = 0.0;
-	
-	//Hannah's Variables
-	///////////////////////////////////////////////////////////////////
-	
-	double radiusOfPipe = 0.25; //[ft]
-    double densityOfWater = (62.4 * 1723); //[lb/in^3]
-    double gravity = 32.17; //[ft/s^2]
-    double areaOfPipe = ((Math.PI) * Math.pow(radiusOfPipe, 2)); //[ft^2]
-    double radiusOfTank = 1.5; //[ft]
-    double areaOfTank = (Math.PI * Math.pow(radiusOfTank, 2)); //[ft^2]
-    /*Chosen pump flow rate [gpm] */
-    public double pumpFlowRate = 1.0; //Q
-    
-    ///////////////////////////////////////////////////////////////////
-    
-    public double calculatePumpHead() {
-        //var timeChangingVolumeOfMainTank = (areaOfTank * tankLevelBeginInterval[currentHour])*1728; //converted to inches^3
-        double pressureHead = (pressureNegativeDemandNode[currentHour] / densityOfWater); //[in]
-        double hydraulicHead = ((Math.pow(this.pumpFlowRate, 2)) / areaOfPipe) * (1 / (2 * gravity)); //[in]
-        double pumpHead = tankLevelBeginInterval[currentHour] + pressureHead + hydraulicHead; //[in]
-        //System.out.println("calculatePumpHead = " + pumpHead);
-        return pumpHead;
+    //Arrays to contain the final results
+    public double[][][] sellerHistory;
+    public double[][][] buyerHistory;
+
+
+    public market(String[] args) {
+        setHouseholds();
+        setHistories();
     }
-    
-	//Fill this out
-    public double calculatePumpEnergyConsumption() {//For 170 psi - Need to call this afterwards to calculate energy consumption
-        //var volumeOfMainTank = (calculatePumpHead() * areaOfTank);
-        //var weightOfWater = (this.totalStorageVolumeToMainSystem[this.currentHour] * densityOfWater) * 8.345; //weight in pounds
-        double energyConsumed;
-        for (int weightOfWater = 422; weightOfWater <= 1000; weightOfWater = weightOfWater + 100) {
-            System.out.println("weightOfWater = " + weightOfWater);
-            System.out.println(weightOfWater * 397.31);
-            System.out.println("poop = " + weightOfWater * 397.31* .0000003766);
-            energyConsumed = weightOfWater * 397.31 * .0000003766;   //(1/2655200)
-            System.out.println("calculatePumpEnergyConsumption = " + energyConsumed);
+
+    //These steps are performed each trade interval
+    public void step(SimState state) {
+
+        System.out.println("Current Increment = " + this.currentHour);
+        //readNodalPressures();
+        exchange();
+        printHouseholdDemands();
+        this.currentHour++;
+        if ((this.currentHour % 24) == 0) {
+            this.currentDay++;
         }
-        
-        //return energyConsumed;
-        return 0.0;
+        for (int i = 0; i < abm.numberHouses; i++) {
+            this.households[i].step_increment();
+        }
+
+        //Tally up the results after the final trade interval
+        if (this.currentHour == abm.hoursInSimulation) {
+            tallyFlow();
+            printIrrigationDemand();
+            printNegativeDemand();
+        }
     }
 
-	
+    //This method initializes the households with basic information, demand profile, and production profile
+    public void setHouseholds() {
+        this.households = new Household[abm.numberHouses];
 
-	public Household(int index, boolean hasTank, double catchmentArea, double tankDiameter, double tankHeight, double WTA, double WTP) {
-		this.index = index;
-		this.hasTank = hasTank;
-		this.catchmentArea = catchmentArea;
-		this.tankDiameter = tankDiameter;
-		this.tankHeight = tankHeight;
-		this.tankStorageVolume = ((Math.PI * ((this.tankDiameter * this.tankDiameter) / 4.0)) * this.tankHeight) * 264.172; //Cylindrical Tank
-		this.WTA = WTA;
-		this.WTP = WTP;
-		
-		this.storageVolumeBeginInterval[0] = 0.0;
-		
-	}
-	
-	public String print_Household() {
-		return ("Household(" + this.index  + ", " + this.hasTank + ", " + this.catchmentArea + ")");
-	}  
-	
-	//This method sets the node ID tags for the three nodes connected to the household
-    public void setNodeTags(String IRID, String NDID, String MSID) {
-    	this.irrigationDemandNodeID = IRID;
-    	this.negativeDemandNodeID = NDID;
-    	this.mainSystemNodeID = MSID;
-    }
-    
+//************************Basic Information Initialization Code*********************
+        File infoFile = new File(abm.basicInfoTextName);
+        try {
+            Scanner sc = new Scanner(infoFile);
+            int index = 0;
+            sc.nextLine(); //skip header
+            while (sc.hasNextLine()) {
+                String i = sc.nextLine();
+                String[] parts = i.split("\t");
+                boolean hasTank = Boolean.parseBoolean(parts[0]);
+                double catchmentArea = Double.parseDouble(parts[1]);
+                double tankDiameter = Double.parseDouble(parts[2]);
+                double tankHeight = Double.parseDouble(parts[3]);
+                double WTA = Double.parseDouble(parts[4]);
+                double WTP = Double.parseDouble(parts[5]);
+                double lawnSize = Double.parseDouble(parts[6]);
+                double irrigEfficiency = Double.parseDouble(parts[7]);
+                double kCrop = Double.parseDouble(parts[8]);
+                double evapotrans = Double.parseDouble(parts[9]);
+                double effectiveRainfall = Double.parseDouble(parts[10]);
+                Household objectSet = new Household(index, hasTank, catchmentArea, tankDiameter, tankHeight, WTA, WTP,
+                        lawnSize, irrigEfficiency, kCrop, evapotrans, effectiveRainfall);
+                this.households[index] = objectSet;
+                index++;
+            }
+            sc.close();
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        }
+//************************End of Basic Information Initialization Code*********************
 
-    
+//************************Rainfall Initialization Code***************************************
 
+        //Rainfall must be a columnar data set with 720 rows --> Cells indicate rainfall in inches
+        File rainFile = new File(abm.rainfallDataFileName);
+        try {
+            double[] rainfall = new double[abm.hoursInSimulation + 1];
+            Scanner sc = new Scanner(rainFile);
+            int index = 0;
+            sc.nextLine(); //skip header
+            while (sc.hasNextLine()) {
+                String i = sc.nextLine();
+                String[] parts = i.split("\t");
+                rainfall[index] = Double.parseDouble(parts[2]);
+                index++;
+            }
+            for (int i = 0; i < abm.numberHouses; i++) {
+                double[] copyRainfall = new double[abm.hoursInSimulation];
+                for (int j = 0; j < abm.hoursInSimulation; j++) {
+                    copyRainfall[j] = rainfall[j];
+                }
+                this.households[i].setHourlyRainfall(copyRainfall);
+            }
+            sc.close();
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        }
+        //************************End of Rainfall Initialization Code************************************
 
+//************************Irrigation Demand Initialization Code***************************************
+        File irrigFile = new File(abm.irrigationDemandFileName);
+        int[] irrPattern = new int[abm.hoursInDay];
+        try {
+            Scanner sc = new Scanner(irrigFile);
+            sc.nextLine(); //skip header
+            int index = 0;
+            while (sc.hasNextLine()) {
+                String i = sc.nextLine();
+                Scanner lsc = new Scanner(i);
+                lsc.nextInt(); //skip hour label
+                irrPattern[index] = lsc.nextInt();
+                index++;
+            }
+            sc.close();
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        }
 
-	public void setIrrigationDemand(double[] irriDemand) {
-		this.irrigationDemand = irriDemand;
-	}
-    
-    //This method sets the total hourly demand of the residential household
-    public void setTotalDemand() {
-    	for (int i = 0; i < this.hoursInMonth; i++) {
-    		this.totalDemand[i] = this.irrigationDemand[i];
-    	}
-    }
-    
-    //This method sets the maximum hourly discharge for the household for a month
-    //Value is set to 75% of theoretical irrigation demand for each hour
-    public void setMaximumHourlyDischarge() {
-    	for (int i = 0; i < this.hoursInMonth; i++) {
-    		if ((this.theoreticalIrrigationDemand[i] * 0.75 * 9) > 60.0) {
-    			this.maximumHourlyDischarge[i] = 60.0;
-    		} else {
-    			this.maximumHourlyDischarge[i] = (this.theoreticalIrrigationDemand[i] * 0.75 * 9);
-    		}
-    	}
-    }
-    
-    //This method sets the hourly rainfall [Units of inches]
-    public void setHourlyRainfall(double hourRainfall[]) {
-    	for (int i = 0; i < this.hoursInMonth; i++) {
-    		this.hourlyRainfall[i] = hourRainfall[i];
-    	}
-    	setTotalHourlyRainfallVolume();
-    	setFlushDiversionRainfallWithinGapFlag();
-    	setHoursSinceLastRainEvent();
-    }
-    
-    //This method sets the total hourly rainfall volume [Units of gal]
-    public void setTotalHourlyRainfallVolume() {
-    	for (int i = 0; i < this.hoursInMonth; i++) {
-    		this.totalHourlyRainfallVolume[i] = ((this.hourlyRainfall[i] / 12.0) * this.catchmentArea) * (7.48052);
-    		if (i > 200 && i < 300) {
-    			//System.out.println(i + " Total Hourly Rainfall Volume = " + this.totalHourlyRainfallVolume[i]);
-    		}
-    	}
-    	//System.exit(0);
-    }
-    
-    //This method sets the flush diversion rainfall within gap flag boolean container [whether there was rainfall in the previous chosen number of hours]
-    public void setFlushDiversionRainfallWithinGapFlag() {
-    	for (int i = 0; i < this.hoursInMonth; i++) {
-    		if (i == 0) {
-    			this.rainfallWithinGapFlag[i] = false;
-    		} else if (i <= this.flushDiversionRainfallGap) {
-    			for(int j = 1; j <= i; j++) {
-    				if (this.hourlyRainfall[i - j] > 0.0) {
-    					this.rainfallWithinGapFlag[i] = true;
-    					break;
-    				}
-    			}
-    	    } else {
-    	    	for(int j = 1; j <= this.flushDiversionRainfallGap; j++) {
-    				if (this.hourlyRainfall[i - j] > 0.0) {
-    					this.rainfallWithinGapFlag[i] = true;
-    					break;
-    				}
-    			}
-    		}
-    	}
-    }
-    
-    //This method sets the number of hours since the last rain event for each hour [Value is zero if rainfall in current hour]
-    public void setHoursSinceLastRainEvent() {
-    	for (int i = 0; i < this.hoursInMonth; i++) {
-    		if (i == 0) {
-    			this.hoursSinceLastRainEvent[i] = 0;
-    		} else {
-    			for(int j = 0; j <= i; j++) {
-//					System.out.println("i: " + String.valueOf(i) + "  j: " + String.valueOf(j));
-//					System.out.println("i-j: " + String.valueOf(i-j));
-//					System.out.println("hourly rainfall:" + this.hourlyRainfall[i-j]);
-    				if (this.hourlyRainfall[i - j] > 0.0) {
-    					this.hoursSinceLastRainEvent[i] = j;
-    					break;
-    				}
-    			}
-    	    }
-    	}
+        int[] sumIrrList = getSummedList(irrPattern);
+        int hourIndex = 0;
 
-    }
-    
-    //This method determines if there has been rain within the specified number of hours set for hours between rain and trade activity
-    public boolean rainCheck() {
-		System.out.println("hours since rain at time " + String.valueOf(this.currentHour) + ": " + String.valueOf(this.hoursSinceLastRainEvent[this.currentHour]));
-		if (this.hoursSinceLastRainEvent[this.currentHour] < this.rainTradeGap) {
-    		return true;
-    	} else {
-    		return false;
-    	}
-    }
+        int[] houseNumArray = IntStream.range(0, abm.numberHouses).toArray();
+        shuffleArray(houseNumArray);
+        /* generate demand patterns and assign them to randomly selected households*/
+        for (int i = 0; i < abm.numberHouses; ) {
+            double[] thisDemand = new double[abm.hoursInSimulation];
+            while (i < sumIrrList[hourIndex]) {
+                int mixedIndex = houseNumArray[i];
+                if (this.households[mixedIndex].hasTank) {
+                    for (int j = 0; j < abm.hoursInSimulation; j++) {
+                        thisDemand[j] = 0.0;
+                    }
+                } else {
+                    thisDemand = generateDemand(hourIndex, mixedIndex);
+                }
+                this.households[mixedIndex].setIrrigationDemand(thisDemand);
+                i += 1;
+            }
+            hourIndex += 1;
+        }
+        //************************End of Irrigation Demand Initialization Code************************************
 
-    //This method increments the current hour of the household and the current day when appropriate
-    public void step_increment() {
-    	this.currentHour++;
-    	if ((this.currentHour % 24) == 0) {
-    		this.currentDay++;
-    	}
-    }
-    
-    //This method estimates the storage that is available for rwh.market and utility exchanges
-    //This value will eventually be dictated by the operational constraints of the pump system and the pressure of the main system node
-    public double estimateAvailableStorage() {
-    	//No exchanges the first 6 hours or the final 6 hours of the year
-    	if (this.currentHour < 6 || this.currentHour > (this.hoursInMonth - 6)) {
-    		System.out.println("No exchanges first or final 6 hours of year!!!!!!!!!!!!!!!!!!!");
-    		return 0.0;
-    	} else {
-    		if (this.hasTank) {
-        		//Sum the scheduled discharges from the current hour to 5 hours into the future --> Then subtract from volume at beginning of current hour
-        		double scheduledDischarge = 0.0;
-        		for (int i = 1; i <= 5; i++) {
-        			scheduledDischarge += this.storageDischargeSchedule[this.currentHour][i];
-        		}
-        		int stepsLeftOff = 0;
-        		for (int i = 1; i <= 5; i++) {
-        			for (int j = 5; j > stepsLeftOff; j--) {
-        				scheduledDischarge += this.storageDischargeSchedule[this.currentHour - i][j];
-        			}
-        			stepsLeftOff++;
-        		}
-        		if ((this.storageVolumeBeginInterval[this.currentHour] - scheduledDischarge) > 0.0) {
-        			//System.out.println(this.storageVolumeBeginInterval[this.currentHour] - scheduledDischarge);
-        		}
-        		//System.exit(0);
-        		
-        		//Need to calculate the free discharge volume available...
-        		//////////////////////////////////////////////////////////
-        		
-        		double marginalHourlyStorageAvailable = 0.0;
-        		double[] schedule = new double[6];
-            	//Calculate discharge for the current hour
-            	for (int i = 1; i <= 5; i++) {
-            		schedule[0] += this.storageDischargeSchedule[this.currentHour - i][i];
-            	}
-            	//Calculate discharge for each of the next 5 hours
-        		for (int i = 1; i <= 5; i++) {
-        			for (int j = 1; j <= 5; j++) {
-        				schedule[i] += this.storageDischargeSchedule[this.currentHour + i - j][j];
-        			}
-        		}
-        		//Now we know the scheduled storage discharge for the current hour and the next 5 hours
-        		//Now iterate through the next 5 hours and subtract each scheduled discharge from its max hourly discharge value and tally
-        		double scheduleDischarge2 = schedule[0];
-        		for (int i = 1; i <= 5; i++) {
-        			marginalHourlyStorageAvailable += (this.maximumHourlyDischarge[this.currentHour + i] - schedule[i]);
-        			scheduleDischarge2 += schedule[i];
-        		}
-        		if (scheduledDischarge != scheduleDischarge2) {
-        			System.out.println("Problem: scheduledDischarge != scheduleDischarge2");
-        			System.exit(0);
-        		}
-        		
-        		
-        		
-        		//////////////////////////////////////////////////////////
-        		
-        		double maxPhysicalStorage = (this.storageVolumeBeginInterval[this.currentHour] - scheduledDischarge);
-        		if (maxPhysicalStorage > marginalHourlyStorageAvailable) {
-        			return marginalHourlyStorageAvailable;
-        		} else {
-        			return maxPhysicalStorage;
-        		}
-        		
-        	} else {
-        		return 0.0;
-        	}
-    	}
-    }
-    
-    //This method returns the total non-potable water demand for the current hour
-    //Returns zero if the household has a rainwater tank
-    public double getDemand() {
-    	if (this.hasTank) {
-    		return 0.0;
-    	} else {
-    		return this.totalDemand[this.currentHour];
-    	}
-    }
-    
-    public void scheduleExchangeDischarge(double sellerHistory) {
-    	if (this.currentHour < 6 || this.currentHour > (this.hoursInMonth - 6)) {
-    		System.out.println("No exchanges first or final 6 hours of year!!!!!!!!!!!!!!!!!!!");
-    		this.storageVolumeForMarket[this.currentHour] = 0.0;
-        	this.storageVolumeForUtility[this.currentHour] = 0.0;
-    		this.totalStorageVolumeToMainSystem[this.currentHour] = 0.0;
-    	} else {
-    		this.storageVolumeForMarket[this.currentHour] = sellerHistory;
-        	this.storageVolumeForUtility[this.currentHour] = 0.0;
-        	//create array that holds total scheduled discharge for each of the next 5 hours
-        	//Iterate through the hours and schedule additional discharge up to the maximum hourly discharge
-        	double[] schedule = new double[6];
-        	//Calculate discharge for the current hour
-        	for (int i = 1; i <= 5; i++) {
-        		schedule[0] += this.storageDischargeSchedule[this.currentHour - i][i];
-        	}
-        	//Calculate discharge for each of the next 5 hours
-    		for (int i = 1; i <= 5; i++) {
-    			for (int j = 1; j <= 5; j++) {
-    				schedule[i] += this.storageDischargeSchedule[this.currentHour + i - j][j];
-    			}
-    		}
-    		//Distribute exchanged storage for discharge over the upcoming 5 hours (You cannot schedule any discharge for the current hour, only 5 hours into future)
-    		double newDischargeRemaining = sellerHistory;
-    		for (int i = 1; i <= 5; i++) {
-    			//Change this for the array!!!!!!
-    			if (schedule[i] < this.maximumHourlyDischarge[this.currentHour + i]) {
-    				if ((schedule[i] + newDischargeRemaining) > this.maximumHourlyDischarge[this.currentHour + i]) {
-    					double dischargeScheduled = this.maximumHourlyDischarge[this.currentHour + i] - schedule[i];
-    					this.storageDischargeSchedule[this.currentHour][i] += dischargeScheduled;
-    					newDischargeRemaining -= dischargeScheduled;
-    				} else {
-    					double dischargeScheduled = newDischargeRemaining;
-    					this.storageDischargeSchedule[this.currentHour][i] += dischargeScheduled;
-    					newDischargeRemaining = 0.0;
-    				}
-    			} else {
-    				System.out.println("Maximum hourly discharge already scheduled****************");
-    			}
-    		}
-    		/*
-    		for (int i = 1; i <= 5; i++) {
-    			//Change this for the array!!!!!!
-    			if (schedule[i] < this.maximumHourlyDischarge) {
-    				if ((schedule[i] + newDischargeRemaining) > this.maximumHourlyDischarge) {
-    					double dischargeScheduled = this.maximumHourlyDischarge - schedule[i];
-    					this.storageDischargeSchedule[this.currentHour][i] += dischargeScheduled;
-    					newDischargeRemaining -= dischargeScheduled;
-    				} else {
-    					double dischargeScheduled = newDischargeRemaining;
-    					this.storageDischargeSchedule[this.currentHour][i] += dischargeScheduled;
-    					newDischargeRemaining = 0.0;
-    				}
-    			} else {
-    				System.out.println("Maximum hourly discharge already scheduled****************");
-    			}
-    		}
-    		*/
-    		this.totalStorageVolumeToMainSystem[this.currentHour] = schedule[0];
-    	}
-		
-    }
-    
-    public void fillExchangeVolume(double sellerHistory) {
-    	this.storageVolumeForMarket[this.currentHour] = sellerHistory;
-    	this.storageVolumeForUtility[this.currentHour] = 0.0;
-    	this.totalStorageVolumeToMainSystem[this.currentHour] = this.storageVolumeForMarket[this.currentHour] + this.storageVolumeForUtility[this.currentHour];
-    }
-    
-    public void storageCalcBegin() {
-    	this.storageVolumeForHouseholdDemand[this.currentHour] = 0.0;
-    	this.storageVolumeAfterHouseholdDemand[this.currentHour] = this.storageVolumeBeginInterval[this.currentHour];
-    	this.tankLevelAfterHouseholdDemand[this.currentHour] = ((this.storageVolumeAfterHouseholdDemand[this.currentHour]) * (1/264.172)) / (Math.PI * ((this.tankDiameter * this.tankDiameter) / 4.0));
-    	//Change to storage volume after current hour discharge
-    	this.storageVolumeAfterDischarge[this.currentHour] = this.storageVolumeAfterHouseholdDemand[this.currentHour] - this.totalStorageVolumeToMainSystem[this.currentHour]; //- this.storageVolumeForMarket[this.currentHour] - this.storageVolumeForUtility[this.currentHour];
-    	this.tankLevelAfterDischarge[this.currentHour] = ((this.storageVolumeAfterDischarge[this.currentHour]) * (1/264.172)) / (Math.PI * ((this.tankDiameter * this.tankDiameter) / 4.0));
-    }
-    
-    public void rainfallStorageCalc() {
-    	firstFlushDiversion(); //Determines first flush diversion volume
-    	double rainfallLeftover = this.totalHourlyRainfallVolume[this.currentHour] - this.firstFlushDiversionVolume[this.currentHour];
-		if ((this.storageVolumeAfterDischarge[this.currentHour] + rainfallLeftover) > this.tankStorageVolume) {
-			this.rainfallOverflowVolume[this.currentHour] = (this.storageVolumeAfterDischarge[this.currentHour] + rainfallLeftover) - this.tankStorageVolume;
-			System.out.println("Tank Storage Volume = " + this.tankStorageVolume);
-			//System.exit(0);
-			this.rainfallToTankVolume[this.currentHour] = rainfallLeftover - this.rainfallOverflowVolume[this.currentHour];
-			if (this.currentHour == (this.hoursInMonth - 1)) {
-				this.finalStorage = this.tankStorageVolume;
-				this.tankLevelFinal = this.tankHeight;
-			} else {
-				this.storageVolumeBeginInterval[this.currentHour + 1] = this.tankStorageVolume;
-				this.tankLevelBeginInterval[this.currentHour + 1] = this.tankHeight;
-			}
-		} else {
-			this.rainfallOverflowVolume[this.currentHour] = 0.0;
-			this.rainfallToTankVolume[this.currentHour] = rainfallLeftover;
-			if (this.currentHour == (this.hoursInMonth - 1)) {
-				this.finalStorage = this.storageVolumeAfterDischarge[this.currentHour] + rainfallLeftover;
-				this.tankLevelFinal = ((this.finalStorage) * (1/264.172)) / (Math.PI * ((this.tankDiameter * this.tankDiameter) / 4.0));
-			} else {
-				this.storageVolumeBeginInterval[this.currentHour + 1] = this.storageVolumeAfterDischarge[this.currentHour] + rainfallLeftover;
-				this.tankLevelBeginInterval[this.currentHour + 1] = ((this.storageVolumeBeginInterval[this.currentHour + 1]) * (1/264.172)) / (Math.PI * ((this.tankDiameter * this.tankDiameter) / 4.0));
-						
-			}
-		}
-		//Change this depending on the city later on ***********************
-		this.rainfallToInfiltrationVolume[this.currentHour] = 0.0;
-		this.rainfallToStormDrainVolume[this.currentHour] = this.rainfallOverflowVolume[this.currentHour];
-		// *****************************************************************
-		
-    }
-    
-    //This method determines the first flush diversion volume for the current hour
-    public void firstFlushDiversion() {
-    	//Determine how many hours first flush diversion was operating before the current hour
-		//If number of hours is greater than zero
-			//Add up the first flush diversion volume through this continuous period
-				//If volume is less than necessary diversion --> flush diversion continues
-				//If volume is equal to necessary diversion --> flush diversion is complete and value is set at zero for current hour
-		//If number of hours is equal to zero
-			//Then check rainfall gap flag
-				//If false --> activate first flush diversion
-					//Check hourly rainfall volume versus necessary diversion
-						//If volume equals or exceeds necessary diversion --> first flush diversion volume set to necessary diversion
-						//If volume is less than necessary diversion --> first flush diversion volume set to hourly rainfall volume
-				//If true --> first flush diversion is inactive and set to zero
-    	if (this.currentHour == 0) {
-    		if (this.totalHourlyRainfallVolume[0] > this.flushDiversionRequirement) {
-    			this.firstFlushDiversionVolume[0] = this.flushDiversionRequirement;
-    		} else {
-    			this.firstFlushDiversionVolume[0] = this.totalHourlyRainfallVolume[0];
-    		}
-    	} else {
-    		//Determine how many hours first flush diversion was operating before the current hour
-    		int continuousFlushHours = 0;
-    		for (int i = 1; i <= this.currentHour; i++) {
-    			if (this.firstFlushDiversionVolume[this.currentHour - i] == 0.0) {
-    				break;
-    			} else {
-    				continuousFlushHours++;
-    			}
-    		}
-    		if (continuousFlushHours > 0) { //If number of hours is greater than zero
-    			double sumPreviousFlush = 0.0;
-    			//Add up the first flush diversion volume through this continuous period
-    			for (int i = 1; i <= continuousFlushHours; i++) {
-    				sumPreviousFlush += this.firstFlushDiversionVolume[this.currentHour - i];
-        		}
-    			if (sumPreviousFlush < this.flushDiversionRequirement) { //flush diversion continues
-    				if (this.totalHourlyRainfallVolume[this.currentHour] > (this.flushDiversionRequirement - sumPreviousFlush)) {
-    	    			this.firstFlushDiversionVolume[this.currentHour] = this.flushDiversionRequirement - sumPreviousFlush;
-    	    		} else {
-    	    			this.firstFlushDiversionVolume[this.currentHour] = this.totalHourlyRainfallVolume[this.currentHour];
-    	    		}
-    			} else { //flush diversion is complete and value is set at zero for current hour
-    				this.firstFlushDiversionVolume[this.currentHour] = 0.0;
-    			}
-    		} else { //If number of hours is equal to zero --> Then check rainfall gap flag
-    			if (!this.rainfallWithinGapFlag[this.currentHour]) { //If false --> activate first flush diversion
-    				//Check hourly rainfall volume versus necessary diversion
-    				if (this.totalHourlyRainfallVolume[this.currentHour] > this.flushDiversionRequirement) {
-    					//If volume exceeds necessary diversion --> first flush diversion volume set to required diversion
-    	    			this.firstFlushDiversionVolume[this.currentHour] = this.flushDiversionRequirement;
-    	    		} else {
-    	    			//If volume is less than necessary diversion --> first flush diversion volume set to hourly rainfall volume
-    	    			this.firstFlushDiversionVolume[this.currentHour] = this.totalHourlyRainfallVolume[this.currentHour];
-    	    		}
-    			} else { //If true --> first flush diversion is inactive and set to zero
-    				this.firstFlushDiversionVolume[this.currentHour] = 0.0;
-    			}
-    		}
-    	}
-    	
+//************************Household Nodes Initialization Code*********************
+
+        //Text infoFile with three columns and as many rows as there are households in the model
+        File nodeIDFile = new File(abm.nodeIDFileName);
+        try {
+            Scanner sc = new Scanner(nodeIDFile);
+            int index = 0;
+            while (sc.hasNextLine()) {
+                String i = sc.nextLine();
+                String[] parts = i.split("\t");
+                String IRID = parts[0];
+                String NDID = parts[1];
+                String MSID = parts[2];
+                this.households[index].setNodeTags(IRID, NDID, MSID);
+                index++;
+            }
+            sc.close();
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        }
+
+//************************End of Nodes Initialization Code*********************
     }
 
 
-  
-    //This method reads through the full EPANET list of nodal pressures and picks out the values that correspond to the ND, IR, and MS nodes of the household
-    public void readNodalPressures(String[] tag, double[] pressure) {
-    	for(int i = 0; i < tag.length; i++) {
-    		if (tag[i] == this.mainSystemNodeID) {
-    			this.pressureMainSystemNode[this.currentHour] = pressure[i];
-    		} else if (tag[i] == this.negativeDemandNodeID) {
-    			this.pressureNegativeDemandNode[this.currentHour] = pressure[i];
-    		} else if (tag[i] == this.irrigationDemandNodeID) {
-    			this.pressureIrrigationDemandNode[this.currentHour] = pressure[i];
-    		}
-    	}
+    public double[] generateDemand(int hour, int houseID) {
+        // Jacob and Haarhofs 2004 formula for average monthly daily demand
+        double dailyIrrigation = (this.households[houseID].lawnSize / this.households[houseID].irrigEfficiency) *
+                (((this.households[houseID].kCrop * this.households[houseID].evapotrans)
+                        - this.households[houseID].effectiveRainfall) / abm.daysInSimulation);
+        dailyIrrigation = dailyIrrigation * abm.cubicMeterToGallonConversion; //convert from cubic meters to gallons
+        double irrigDemand[] = new double[abm.hoursInSimulation];
+        int index = 0;
+        while (index < abm.daysInSimulation) {
+            irrigDemand[hour + (index * abm.hoursInDay)] = dailyIrrigation;
+            index++;
+        }
+        return irrigDemand;
     }
-    
-    public void printRainfallToTank() {
-    	try {
-        	
-        	String fileName = "C:\\Rainwater Harvesting\\Seller Information.txt";
-        	File file = new File(fileName);
-        	PrintWriter writer = new PrintWriter(file);
-        	for (int i = 0; i < 744; i++) {
-        		writer.println(i + " Rainfall to Tank Volume = \t" + this.rainfallToTankVolume[i]);
-        	}
-        	for (int i = 0; i < 744; i++) {
-        		writer.println(i + " First Flush Diversion Volume = \t" + this.firstFlushDiversionVolume[i]);
-        	}
-        	for (int i = 0; i < 744; i++) {
-        		writer.println(i + " Rainfall Overflow Volume = \t" + this.rainfallOverflowVolume[i]);
-        	}
-        	for (int i = 0; i < 744; i++) {
-        		writer.println(i + " Tank Level Beginning of Hour = \t" + this.tankLevelBeginInterval[i]);
-        	}
-        	for (int i = 0; i < 744; i++) {
-        		writer.println(i + " Storage Volume Beginning of Hour = \t" + this.storageVolumeBeginInterval[i]);
-        	}
-        	for (int i = 0; i < 744; i++) {
-        		writer.println(i + " Total Storage Volume to Main System = \t" + this.totalStorageVolumeToMainSystem[i]);
-        	}
-        	
-        	writer.close();
-        	} catch (FileNotFoundException e) {
-        		
-        	}
+
+    public void exchange() {
+        boolean continuationFlag = true;
+        int currentRound = 0;
+        do {
+
+            double[] excess = new double[abm.numberHouses];
+            double[] demand = new double[abm.numberHouses];
+            /* iterate through houses */
+            for (int i = 0; i < abm.numberHouses; i++) {
+                /* set demand and excess to zero if it has recently rained */
+                if (this.households[i].rainCheck()) {
+                    demand[i] = 0;
+                    excess[i] = 0;
+//                    System.out.println("Rain check ------------------ No Trading Activity!!!!!");
+                } else {
+                    if ((this.households[i].irrigationDemand[this.currentHour] - this.buyerHistory[i][this.currentHour][0]) > 0.0) {
+                        demand[i] = this.households[i].irrigationDemand[this.currentHour] - this.buyerHistory[i][this.currentHour][0];
+                        //System.out.println(demand[i]);
+                        //System.exit(0);
+                    } else {
+                        demand[i] = 0;
+                    }
+
+                    if ((this.households[i].estimateAvailableStorage() - this.sellerHistory[i][this.currentHour][0]) > 0.0) {
+                        excess[i] = this.households[i].estimateAvailableStorage() - this.sellerHistory[i][this.currentHour][0];
+                    } else {
+                        excess[i] = 0;
+                    }
+                }
+
+            }
+
+            //Boolean flag for zero demand
+            boolean zeroDemand = true;
+            for (int i = 0; i < abm.numberHouses; i++) {
+                if (demand[i] > 0.0) {
+                    zeroDemand = false;
+                    break;
+                }
+            }
+            if (zeroDemand) {
+                continuationFlag = false;
+            }
+            //Boolean flag for zero excess
+            boolean zeroExcess = true;
+            for (int i = 0; i < abm.numberHouses; i++) {
+                if (excess[i] > 0.0) {
+                    zeroExcess = false;
+                    break;
+                }
+            }
+            if (zeroExcess) {
+                continuationFlag = false;
+            }
+
+            int buyerCount = 0;
+            int sellerCount = 0;
+            for (int i = 0; i < abm.numberHouses; i++) {
+                if (excess[i] > 0) {
+                    sellerCount++;
+                }
+                if (demand[i] > 0) {
+                    buyerCount++;
+                }
+            }
+            int[] buyerIndex = new int[buyerCount];
+            int[] sellerIndex = new int[sellerCount];
+            //fill buyer index
+            int indexB = 0;
+            for (int i = 0; i < abm.numberHouses; i++) {
+                if (demand[i] > 0) {
+                    buyerIndex[indexB] = i;
+                    indexB++;
+                }
+            }
+            //fill seller index
+            int indexS = 0;
+            for (int i = 0; i < abm.numberHouses; i++) {
+                if (excess[i] > 0) {
+                    sellerIndex[indexS] = i;
+                    indexS++;
+                }
+            }
+
+            //Functions for buyers
+            boolean[] buyerCovered = new boolean[buyerCount];
+            for (int i = 0; i < buyerCount; i++) {
+                buyerCovered[i] = false;
+            }
+            int[] buyersOrdered = new int[buyerCount];
+            //System.out.println("Buyers Ordered = " + buyersOrdered.length);
+            for (int i = 0; i < buyerCount; i++) {
+                int currentMaxIndex = 1000;
+                double currentMax = -10000000.0;
+                for (int j = 0; j < buyerCount; j++) {
+                    if (this.households[buyerIndex[j]].WTP >= currentMax && buyerCovered[j] == false) {
+                        currentMaxIndex = buyerIndex[j];
+                        currentMax = this.households[buyerIndex[j]].WTP;
+                    }
+                }
+                buyersOrdered[i] = currentMaxIndex;
+                for (int k = 0; k < buyerCount; k++) {
+                    if (buyerIndex[k] == currentMaxIndex) {
+                        buyerCovered[k] = true;
+                    }
+                }
+            }
+
+            //Functions for sellers
+            boolean[] sellerCovered = new boolean[sellerCount];
+            for (int i = 0; i < sellerCount; i++) {
+                sellerCovered[i] = false;
+            }
+            int[] sellersOrdered = new int[sellerCount];
+            for (int i = 0; i < sellerCount; i++) {
+                int currentMinIndex = 1000;
+                double currentMin = 10000000.0;
+                for (int j = 0; j < sellerCount; j++) {
+                    if (this.households[sellerIndex[j]].WTA <= currentMin && sellerCovered[j] == false) {
+                        currentMinIndex = sellerIndex[j];
+                        currentMin = this.households[sellerIndex[j]].WTA;
+                    }
+                }
+                sellersOrdered[i] = currentMinIndex;
+                for (int k = 0; k < sellerCount; k++) {
+                    if (sellerIndex[k] == currentMinIndex) {
+                        sellerCovered[k] = true;
+                    }
+                }
+            }
+
+            int totalExchanges;
+            if (buyersOrdered.length < sellersOrdered.length) {
+                totalExchanges = buyersOrdered.length;
+            } else {
+                totalExchanges = sellersOrdered.length;
+            }
+
+            System.out.println(buyersOrdered.length);
+            //Boolean flag to check WTA and WTP of first paired traders
+            if (sellersOrdered.length == 0 || buyersOrdered.length == 0) {
+                continuationFlag = false;
+                if (currentRound > 0) {
+                    System.out.println("No buyers");
+                    System.out.println("Current Hour = " + this.currentHour);
+                    System.out.println();
+                }
+            } else {
+                if (this.households[buyersOrdered[0]].WTP < this.households[sellersOrdered[0]].WTA) {
+                    continuationFlag = false;
+                }
+            }
+
+            for (int i = 0; i < totalExchanges; i++) {
+                int sellerIndex2 = sellersOrdered[i];
+                int buyerIndex2 = buyersOrdered[i];
+                double seller_wta = this.households[sellerIndex2].WTA;
+                double buyer_wtp = this.households[buyerIndex2].WTP;
+                double seller_cap = excess[sellerIndex2];
+                double buyer_need = demand[buyerIndex2];
+                //Exchange Amount in units of kWh
+                double exchangeAmount = 0.0;
+                if (seller_wta <= buyer_wtp) {
+                    if (seller_cap >= buyer_need) {
+                        exchangeAmount = buyer_need;
+                    } else if (seller_cap <= 0) {
+                        exchangeAmount = 0;
+                    } else {
+                        exchangeAmount = seller_cap;
+                    }
+
+                    if (true) {
+                        System.out.println("----------- An Exchange Has Been Made");
+                        System.out.println("Seller: " + sellerIndex2 + " Seller WTA = " + seller_wta + " Buyer: " + buyerIndex2 + " Buyer WTP = " + buyer_wtp);
+                        System.out.println("Seller Cap = " + seller_cap);
+                        System.out.println("Buyer Need = " + buyer_need);
+                        System.out.println("Exchange Amount = " + exchangeAmount);
+                    }
+
+                } else {
+                    System.out.println("No Exchange Made -----------");
+                    System.out.println("Seller: " + sellerIndex2 + " Seller WTA = " + seller_wta + " Buyer: " + buyerIndex2 + " Buyer WTP = " + buyer_wtp);
+                    System.out.println("Seller Cap = " + seller_cap);
+                    System.out.println("Buyer Need = " + buyer_need);
+                }
+
+                System.out.println("Exchange = " + exchangeAmount);
+                if (exchangeAmount > 0) {
+                    this.sellerHistory[sellerIndex2][this.currentHour][0] += exchangeAmount;
+                    this.sellerHistory[sellerIndex2][this.currentHour][1] += buyer_wtp * exchangeAmount;
+                    this.buyerHistory[buyerIndex2][this.currentHour][0] += exchangeAmount;
+                    this.buyerHistory[buyerIndex2][this.currentHour][1] += buyer_wtp * exchangeAmount;
+                }
+            }
+
+            currentRound++;
+        } while (continuationFlag);
+
+        System.out.println("End of Trade Interval - " + this.currentHour + "   ******************************");
+        for (int i = 0; i < abm.numberHouses; i++) {
+            if (this.households[i].hasTank) {
+                this.households[i].scheduleExchangeDischarge(this.sellerHistory[i][this.currentHour][0]);
+                this.households[i].storageCalcBegin();
+                this.households[i].rainfallStorageCalc();
+            }
+        }
+    }
+
+    /* Shuffle an array*/
+    private void shuffleArray(int[] array) {
+        int index, temp;
+        Random random = new Random();
+        for (int i = array.length - 1; i > 0; i--) {
+            index = random.nextInt(i + 1);
+            temp = array[index];
+            array[index] = array[i];
+            array[i] = temp;
+        }
+    }
+
+    //Print demands to a text file
+    public void printHouseholdDemands() {
+        try {
+            File file = new File(abm.nodalDemandOutputFileName);
+            PrintWriter writer = new PrintWriter(file);
+            for (int i = 0; i < abm.numberHouses; i++) {
+                writer.println((-1.0 * (this.households[i].totalStorageVolumeToMainSystem[this.currentHour] / 60.0)) + "\t" + (this.households[i].totalIrrigDemand[this.currentHour] / 60.0));
+            }
+
+            writer.close();
+        } catch (FileNotFoundException e) {
+
+        }
+    }
+
+    //Print total irrigation demand to a text file
+    public void printIrrigationDemand() {
+        try {
+            File file = new File(abm.irrigationDemandOutputFileName);
+            PrintWriter writer = new PrintWriter(file);
+            for (int i = 0; i < abm.numberHouses; i++) {
+                String line = "";
+                for (int j = 0; j < abm.hoursInSimulation; j++) {
+                    line += (this.households[i].irrigationDemand[j] / 60.0);
+                    line += "\t";
+                }
+                writer.println(line);
+            }
+
+            writer.close();
+        } catch (FileNotFoundException e) {
+
+        }
+    }
+
+    // Print negative demand to a text file
+    public void printNegativeDemand() {
+        try {
+            File file = new File(abm.negativeDemandOutputFileName);
+            PrintWriter writer = new PrintWriter(file);
+            for (int i = 0; i < abm.numberHouses; i++) {
+                String line = "";
+                for (int j = 0; j < abm.hoursInSimulation; j++) {
+                    line += (-this.households[i].totalStorageVolumeToMainSystem[j] / 60.0);
+                    line += "\t";
+                }
+                writer.println(line);
+            }
+            writer.close();
+        } catch (FileNotFoundException e) {
+        }
+    }
+
+    //
+    public void tallyFlow() {
+        double[] rainfallToTank = new double[abm.hoursInSimulation];
+        double[] firstFlush = new double[abm.hoursInSimulation];
+        double[] rainfallOverflow = new double[abm.hoursInSimulation];
+        double[] storageToMain = new double[abm.hoursInSimulation];
+        double[] totalDemand = new double[abm.hoursInSimulation];
+        for (int i = 0; i < abm.numberHouses; i++) {
+            for (int j = 0; j < abm.hoursInSimulation; j++) {
+                rainfallToTank[j] += this.households[i].rainfallToTankVolume[j];
+                firstFlush[j] += this.households[i].firstFlushDiversionVolume[j];
+                rainfallOverflow[j] += this.households[i].rainfallOverflowVolume[j];
+                storageToMain[j] += this.households[i].totalStorageVolumeToMainSystem[j];
+                totalDemand[j] += this.households[i].totalIrrigDemand[j];
+            }
+        }
+        try {
+
+            File file = new File(abm.allSellerInfoOutputFileName);
+            PrintWriter writer = new PrintWriter(file);
+            for (int i = 0; i < abm.hoursInSimulation; i++) {
+                writer.println(i + " Rainfall to Tank Volume = \t" + rainfallToTank[i]);
+            }
+            for (int i = 0; i < abm.hoursInSimulation; i++) {
+                writer.println(i + " First Flush Diversion Volume = \t" + firstFlush[i]);
+            }
+            for (int i = 0; i < abm.hoursInSimulation; i++) {
+                writer.println(i + " Rainfall Overflow Volume = \t" + rainfallOverflow[i]);
+            }
+            for (int i = 0; i < abm.hoursInSimulation; i++) {
+                writer.println(i + " Tank Level Beginning of Hour = \t");
+            }
+            for (int i = 0; i < abm.hoursInSimulation; i++) {
+                writer.println(i + " Storage Volume Beginning of Hour = \t");
+            }
+            for (int i = 0; i < abm.hoursInSimulation; i++) {
+                writer.println(i + " Total Storage Volume to Main System = \t" + storageToMain[i]);
+            }
+            for (int i = 0; i < abm.hoursInSimulation; i++) {
+                writer.println(i + " Total Demand of Households = \t" + totalDemand[i]);
+            }
+
+            writer.close();
+        } catch (FileNotFoundException e) {
+
+        }
+    }
+
+    /* Calculate the total number of agents at each time step*/
+    public int[] getSummedList(int[] theList) {
+        int[] summedList = new int[theList.length];
+        int currentSum = 0;
+        for (int i = 0; i < theList.length; i++) {
+            currentSum = currentSum + theList[i];
+            summedList[i] = currentSum;
+        }
+        return summedList;
+    }
+
+    /* Set the sizes of final result arrays*/
+    public void setHistories() {
+        sellerHistory = new double[abm.numberHouses][abm.hoursInSimulation][3];
+        buyerHistory = new double[abm.numberHouses][abm.hoursInSimulation][2];
     }
 
 }
