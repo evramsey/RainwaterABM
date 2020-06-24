@@ -6,75 +6,49 @@ import sim.engine.Steppable;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.PrintWriter;
+import java.util.Random;
 import java.util.Scanner;
+import java.util.stream.IntStream;
 
 
 public class market implements Steppable {
 
-    public market(String[] args) {
-        setInputFiles(args);
 
-    }
-
-    /*Current hour of month [0-720] */
+    /* Current hour of simulation */
     public int currentHour = 0;
-    /*Current day of year [0-364] */
+    /* Current day of year */
     public int currentDay = 0;
-    /*Number of hours in a day */
-    public int hoursInDay = 24;
-    /*Number of days in Month (April) */
-    public int daysInMonth = 30;
-    /*Number of hours in month (April) */
-    public int hoursInMonth = 720;
 
-    private String basicInfoTextName;
-    private String rainfallDataFileName;
-    private String irrigationDemandFileName;
-    private String nodeIDFileName;
-
-    public boolean initialized = false;
-
-    //This int represents the number of households in the system
-    //There must be this many households in the basic information input file!!!
-    //TODO: change to count number of lines
-    public int numberHouses = 2016;
     //An array to contain the households
     public Household[] households;
 
-    //Final Result Containers
-    public double[][][] sellerHistory = new double[this.numberHouses][this.hoursInMonth][3];
-    public double[][][] buyerHistory = new double[this.numberHouses][this.hoursInMonth][2];
+    //Arrays to contain the final results
+    public double[][][] sellerHistory;
+    public double[][][] buyerHistory;
 
-    /* Set input file names equal to command line arguments*/
-    public void setInputFiles(String[] fileNames){
-        basicInfoTextName = fileNames[0];
-        rainfallDataFileName = fileNames[1];
-        irrigationDemandFileName = fileNames[2];
-        nodeIDFileName = fileNames[3];
+
+    public market(String[] args) {
+        setHouseholds();
+        setHistories();
     }
-
-
 
     //These steps are performed each trade interval
     public void step(SimState state) {
-        //Initialization call (only performed once)
-        if (initialized == false) {
-            set_households();
-        }
+
         System.out.println("Current Increment = " + this.currentHour);
-        readNodalPressures();
+        //readNodalPressures();
         exchange();
         printHouseholdDemands();
         this.currentHour++;
         if ((this.currentHour % 24) == 0) {
             this.currentDay++;
         }
-        for (int i = 0; i < this.numberHouses; i++) {
+        for (int i = 0; i < abm.numberHouses; i++) {
             this.households[i].step_increment();
         }
 
         //Tally up the results after the final trade interval
-        if (this.currentHour == this.hoursInMonth) {
+        if (this.currentHour == abm.hoursInSimulation) {
             tallyFlow();
             printIrrigationDemand();
             printNegativeDemand();
@@ -82,14 +56,15 @@ public class market implements Steppable {
     }
 
     //This method initializes the households with basic information, demand profile, and production profile
-    public void set_households() {
-        this.households = new Household[this.numberHouses];
+    public void setHouseholds() {
+        this.households = new Household[abm.numberHouses];
 
 //************************Basic Information Initialization Code*********************
-        File infoFile = new File(basicInfoTextName);
+        File infoFile = new File(abm.basicInfoTextName);
         try {
             Scanner sc = new Scanner(infoFile);
             int index = 0;
+            sc.nextLine(); //skip header
             while (sc.hasNextLine()) {
                 String i = sc.nextLine();
                 String[] parts = i.split("\t");
@@ -99,7 +74,13 @@ public class market implements Steppable {
                 double tankHeight = Double.parseDouble(parts[3]);
                 double WTA = Double.parseDouble(parts[4]);
                 double WTP = Double.parseDouble(parts[5]);
-                Household objectSet = new Household(index, hasTank, catchmentArea, tankDiameter, tankHeight, WTA, WTP);
+                double lawnSize = Double.parseDouble(parts[6]);
+                double irrigEfficiency = Double.parseDouble(parts[7]);
+                double kCrop = Double.parseDouble(parts[8]);
+                double evapotrans = Double.parseDouble(parts[9]);
+                double effectiveRainfall = Double.parseDouble(parts[10]);
+                Household objectSet = new Household(index, hasTank, catchmentArea, tankDiameter, tankHeight, WTA, WTP,
+                        lawnSize, irrigEfficiency, kCrop, evapotrans, effectiveRainfall);
                 this.households[index] = objectSet;
                 index++;
             }
@@ -112,19 +93,21 @@ public class market implements Steppable {
 //************************Rainfall Initialization Code***************************************
 
         //Rainfall must be a columnar data set with 720 rows --> Cells indicate rainfall in inches
-        File rainFile = new File(rainfallDataFileName);
+        File rainFile = new File(abm.rainfallDataFileName);
         try {
-            double[] rainfall = new double[this.hoursInMonth + 1];
+            double[] rainfall = new double[abm.hoursInSimulation + 1];
             Scanner sc = new Scanner(rainFile);
             int index = 0;
+            sc.nextLine(); //skip header
             while (sc.hasNextLine()) {
                 String i = sc.nextLine();
-                rainfall[index] = Double.parseDouble(i);
+                String[] parts = i.split("\t");
+                rainfall[index] = Double.parseDouble(parts[2]);
                 index++;
             }
-            for (int i = 0; i < this.numberHouses; i++) {
-                double[] copyRainfall = new double[this.hoursInMonth];
-                for (int j = 0; j < this.hoursInMonth; j++) {
+            for (int i = 0; i < abm.numberHouses; i++) {
+                double[] copyRainfall = new double[abm.hoursInSimulation];
+                for (int j = 0; j < abm.hoursInSimulation; j++) {
                     copyRainfall[j] = rainfall[j];
                 }
                 this.households[i].setHourlyRainfall(copyRainfall);
@@ -133,11 +116,11 @@ public class market implements Steppable {
         } catch (FileNotFoundException e) {
             e.printStackTrace();
         }
- //************************End of Rainfall Initialization Code************************************
+        //************************End of Rainfall Initialization Code************************************
 
 //************************Irrigation Demand Initialization Code***************************************
-        File irrigFile = new File(irrigationDemandFileName);
-        int[] irrPattern = new int[this.hoursInDay];
+        File irrigFile = new File(abm.irrigationDemandFileName);
+        int[] irrPattern = new int[abm.hoursInDay];
         try {
             Scanner sc = new Scanner(irrigFile);
             sc.nextLine(); //skip header
@@ -153,23 +136,35 @@ public class market implements Steppable {
         } catch (FileNotFoundException e) {
             e.printStackTrace();
         }
+
         int[] sumIrrList = getSummedList(irrPattern);
-        int ind = 0;
-        for (int i = 0; i < this.numberHouses; ) {
-            double[] thisDemand;
-            while (i < sumIrrList[ind]) {
-                thisDemand = generateDemand(ind);
-                this.households[i].setIrrigationDemand(thisDemand);
+        int hourIndex = 0;
+
+        int[] houseNumArray = IntStream.range(0, abm.numberHouses).toArray();
+        shuffleArray(houseNumArray);
+        /* generate demand patterns and assign them to randomly selected households*/
+        for (int i = 0; i < abm.numberHouses; ) {
+            double[] thisDemand = new double[abm.hoursInSimulation];
+            while (i < sumIrrList[hourIndex]) {
+                int mixedIndex = houseNumArray[i];
+                if (this.households[mixedIndex].hasTank) {
+                    for (int j = 0; j < abm.hoursInSimulation; j++) {
+                        thisDemand[j] = 0.0;
+                    }
+                } else {
+                    thisDemand = generateDemand(hourIndex, mixedIndex);
+                }
+                this.households[mixedIndex].setIrrigationDemand(thisDemand);
                 i += 1;
             }
-            ind += 1;
+            hourIndex += 1;
         }
- //************************End of Irrigation Demand Initialization Code************************************
+        //************************End of Irrigation Demand Initialization Code************************************
 
 //************************Household Nodes Initialization Code*********************
 
         //Text infoFile with three columns and as many rows as there are households in the model
-        File nodeIDFile = new File(nodeIDFileName);
+        File nodeIDFile = new File(abm.nodeIDFileName);
         try {
             Scanner sc = new Scanner(nodeIDFile);
             int index = 0;
@@ -190,26 +185,20 @@ public class market implements Steppable {
 //************************End of Nodes Initialization Code*********************
     }
 
-    public double[] generateDemand(int hour) {
-        //TODO: update testIrrigation value
-        double testIrrigation = 500.0; //gallons per day, to replace with appropriate calculation function later
-        double irrigDemand[] = new double[this.hoursInMonth];
+
+    public double[] generateDemand(int hour, int houseID) {
+        // Jacob and Haarhofs 2004 formula for average monthly daily demand
+        double dailyIrrigation = (this.households[houseID].lawnSize / this.households[houseID].irrigEfficiency) *
+                (((this.households[houseID].kCrop * this.households[houseID].evapotrans)
+                        - this.households[houseID].effectiveRainfall) / abm.daysInSimulation);
+        dailyIrrigation = dailyIrrigation * abm.cubicMeterToGallonConversion; //convert from cubic meters to gallons
+        double irrigDemand[] = new double[abm.hoursInSimulation];
         int index = 0;
-        while (index < this.daysInMonth) {
-            irrigDemand[hour + (index * this.hoursInDay)] = testIrrigation;
+        while (index < abm.daysInSimulation) {
+            irrigDemand[hour + (index * abm.hoursInDay)] = dailyIrrigation;
             index++;
         }
         return irrigDemand;
-    }
-
-    public int[] getSummedList(int[] theList) {
-        int[] summedList = new int[theList.length];
-        int currentSum = 0;
-        for (int i = 0; i < theList.length; i++) {
-            currentSum = currentSum + theList[i];
-            summedList[i] = currentSum;
-        }
-        return summedList;
     }
 
     public void exchange() {
@@ -217,16 +206,18 @@ public class market implements Steppable {
         int currentRound = 0;
         do {
 
-            double[] excess = new double[this.numberHouses];
-            double[] demand = new double[this.numberHouses];
-            for (int i = 0; i < this.numberHouses; i++) {
+            double[] excess = new double[abm.numberHouses];
+            double[] demand = new double[abm.numberHouses];
+            /* iterate through houses */
+            for (int i = 0; i < abm.numberHouses; i++) {
+                /* set demand and excess to zero if it has recently rained */
                 if (this.households[i].rainCheck()) {
                     demand[i] = 0;
                     excess[i] = 0;
-                    System.out.println("Rain check ------------------ No Trading Activity!!!!!");
+//                    System.out.println("Rain check ------------------ No Trading Activity!!!!!");
                 } else {
-                    if ((this.households[i].getDemand() - this.buyerHistory[i][this.currentHour][0]) > 0.0) {
-                        demand[i] = this.households[i].getDemand() - this.buyerHistory[i][this.currentHour][0];
+                    if ((this.households[i].irrigationDemand[this.currentHour] - this.buyerHistory[i][this.currentHour][0]) > 0.0) {
+                        demand[i] = this.households[i].irrigationDemand[this.currentHour] - this.buyerHistory[i][this.currentHour][0];
                         //System.out.println(demand[i]);
                         //System.exit(0);
                     } else {
@@ -235,8 +226,6 @@ public class market implements Steppable {
 
                     if ((this.households[i].estimateAvailableStorage() - this.sellerHistory[i][this.currentHour][0]) > 0.0) {
                         excess[i] = this.households[i].estimateAvailableStorage() - this.sellerHistory[i][this.currentHour][0];
-                        //System.out.println(excess[i]);
-                        //System.exit(0);
                     } else {
                         excess[i] = 0;
                     }
@@ -246,9 +235,10 @@ public class market implements Steppable {
 
             //Boolean flag for zero demand
             boolean zeroDemand = true;
-            for (int i = 0; i < this.numberHouses; i++) {
+            for (int i = 0; i < abm.numberHouses; i++) {
                 if (demand[i] > 0.0) {
                     zeroDemand = false;
+                    break;
                 }
             }
             if (zeroDemand) {
@@ -256,9 +246,10 @@ public class market implements Steppable {
             }
             //Boolean flag for zero excess
             boolean zeroExcess = true;
-            for (int i = 0; i < this.numberHouses; i++) {
+            for (int i = 0; i < abm.numberHouses; i++) {
                 if (excess[i] > 0.0) {
                     zeroExcess = false;
+                    break;
                 }
             }
             if (zeroExcess) {
@@ -267,7 +258,7 @@ public class market implements Steppable {
 
             int buyerCount = 0;
             int sellerCount = 0;
-            for (int i = 0; i < this.numberHouses; i++) {
+            for (int i = 0; i < abm.numberHouses; i++) {
                 if (excess[i] > 0) {
                     sellerCount++;
                 }
@@ -279,7 +270,7 @@ public class market implements Steppable {
             int[] sellerIndex = new int[sellerCount];
             //fill buyer index
             int indexB = 0;
-            for (int i = 0; i < this.numberHouses; i++) {
+            for (int i = 0; i < abm.numberHouses; i++) {
                 if (demand[i] > 0) {
                     buyerIndex[indexB] = i;
                     indexB++;
@@ -287,7 +278,7 @@ public class market implements Steppable {
             }
             //fill seller index
             int indexS = 0;
-            for (int i = 0; i < this.numberHouses; i++) {
+            for (int i = 0; i < abm.numberHouses; i++) {
                 if (excess[i] > 0) {
                     sellerIndex[indexS] = i;
                     indexS++;
@@ -341,7 +332,7 @@ public class market implements Steppable {
                 }
             }
 
-            int totalExchanges = 0;
+            int totalExchanges;
             if (buyersOrdered.length < sellersOrdered.length) {
                 totalExchanges = buyersOrdered.length;
             } else {
@@ -356,14 +347,12 @@ public class market implements Steppable {
                     System.out.println("No buyers");
                     System.out.println("Current Hour = " + this.currentHour);
                     System.out.println();
-                    //System.exit(0);
                 }
             } else {
                 if (this.households[buyersOrdered[0]].WTP < this.households[sellersOrdered[0]].WTA) {
                     continuationFlag = false;
                 }
             }
-
 
             for (int i = 0; i < totalExchanges; i++) {
                 int sellerIndex2 = sellersOrdered[i];
@@ -391,9 +380,6 @@ public class market implements Steppable {
                         System.out.println("Exchange Amount = " + exchangeAmount);
                     }
 
-                    //System.exit(0);
-
-
                 } else {
                     System.out.println("No Exchange Made -----------");
                     System.out.println("Seller: " + sellerIndex2 + " Seller WTA = " + seller_wta + " Buyer: " + buyerIndex2 + " Buyer WTP = " + buyer_wtp);
@@ -414,82 +400,34 @@ public class market implements Steppable {
         } while (continuationFlag);
 
         System.out.println("End of Trade Interval - " + this.currentHour + "   ******************************");
-        for (int i = 0; i < this.numberHouses; i++) {
+        for (int i = 0; i < abm.numberHouses; i++) {
             if (this.households[i].hasTank) {
                 this.households[i].scheduleExchangeDischarge(this.sellerHistory[i][this.currentHour][0]);
                 this.households[i].storageCalcBegin();
                 this.households[i].rainfallStorageCalc();
             }
         }
-
-
     }
 
-    public void readNodalPressures() {
-        //
-        String filePath = "/Users/lizramsey/Documents/workspace/RWH/Nodal Pressures.txt";
-
-        File file = new File(filePath);
-
-        try {
-
-            double[] nodePressure = new double[this.numberHouses * 3];
-
-            Scanner sc = new Scanner(file);
-
-            int index = 0;
-
-            while (sc.hasNextLine()) {
-                String i = sc.nextLine();
-                String[] parts = i.split("\t");
-                double IRP = Double.parseDouble(parts[0]);
-                double NDP = Double.parseDouble(parts[1]);
-                double MSP = Double.parseDouble(parts[2]);
-
-                this.households[index].pressureIrrigationDemandNode[this.currentHour] = IRP;
-                this.households[index].pressureNegativeDemandNode[this.currentHour] = NDP;
-                this.households[index].pressureMainSystemNode[this.currentHour] = MSP;
-
-                index++;
-            }
-
-            for (int i = 0; i < this.numberHouses; i++) {
-                //this.households[i].readNodalPressures(nodeTag, nodePressure);
-            }
-
-            sc.close();
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
+    /* Shuffle an array*/
+    private void shuffleArray(int[] array) {
+        int index, temp;
+        Random random = new Random();
+        for (int i = array.length - 1; i > 0; i--) {
+            index = random.nextInt(i + 1);
+            temp = array[index];
+            array[index] = array[i];
+            array[i] = temp;
         }
     }
 
-    //This method prints household node pressures to a text file
-    public void printHouseholdPressures() {
-        try {
-
-            String fileName = "/Users/lizramsey/Documents/workspace/RWH/output/Pressure At Nodes.txt";
-            File file = new File(fileName);
-            PrintWriter writer = new PrintWriter(file);
-            for (int i = 0; i < this.numberHouses; i++) {
-                writer.println(this.households[i].pressureIrrigationDemandNode[this.currentHour] + "\t" + this.households[i].pressureNegativeDemandNode[this.currentHour] + "\t" + this.households[i].pressureMainSystemNode[this.currentHour]);
-            }
-
-            writer.close();
-        } catch (FileNotFoundException e) {
-
-        }
-    }
-
-
-    //This method prints demands to a text file
+    //Print demands to a text file
     public void printHouseholdDemands() {
         try {
-
-            String fileName = "/Users/lizramsey/Documents/workspace/RWH/output/Demand At Nodes.txt";
-            File file = new File(fileName);
+            File file = new File(abm.nodalDemandOutputFileName);
             PrintWriter writer = new PrintWriter(file);
-            for (int i = 0; i < this.numberHouses; i++) {
-                writer.println((-1.0 * (this.households[i].totalStorageVolumeToMainSystem[this.currentHour] / 60.0)) + "\t" + (this.households[i].totalDemand[this.currentHour] / 60.0));
+            for (int i = 0; i < abm.numberHouses; i++) {
+                writer.println((-1.0 * (this.households[i].totalStorageVolumeToMainSystem[this.currentHour] / 60.0)) + "\t" + (this.households[i].totalIrrigDemand[this.currentHour] / 60.0));
             }
 
             writer.close();
@@ -498,16 +436,14 @@ public class market implements Steppable {
         }
     }
 
-    //
+    //Print total irrigation demand to a text file
     public void printIrrigationDemand() {
         try {
-
-            String fileName = "/Users/lizramsey/Documents/workspace/RWH/output/Irrigation Demand Output.txt";
-            File file = new File(fileName);
+            File file = new File(abm.irrigationDemandOutputFileName);
             PrintWriter writer = new PrintWriter(file);
-            for (int i = 0; i < this.numberHouses; i++) {
+            for (int i = 0; i < abm.numberHouses; i++) {
                 String line = "";
-                for (int j = 0; j < this.hoursInMonth; j++) {
+                for (int j = 0; j < abm.hoursInSimulation; j++) {
                     line += (this.households[i].irrigationDemand[j] / 60.0);
                     line += "\t";
                 }
@@ -520,20 +456,64 @@ public class market implements Steppable {
         }
     }
 
-    //
+    // Print negative demand to a text file
     public void printNegativeDemand() {
         try {
-
-            String fileName = "/Users/lizramsey/Documents/workspace/RWH/output/Negative Demand Output.txt";
-            File file = new File(fileName);
+            File file = new File(abm.negativeDemandOutputFileName);
             PrintWriter writer = new PrintWriter(file);
-            for (int i = 0; i < this.numberHouses; i++) {
+            for (int i = 0; i < abm.numberHouses; i++) {
                 String line = "";
-                for (int j = 0; j < this.hoursInMonth; j++) {
+                for (int j = 0; j < abm.hoursInSimulation; j++) {
                     line += (-this.households[i].totalStorageVolumeToMainSystem[j] / 60.0);
                     line += "\t";
                 }
                 writer.println(line);
+            }
+            writer.close();
+        } catch (FileNotFoundException e) {
+        }
+    }
+
+    //
+    public void tallyFlow() {
+        double[] rainfallToTank = new double[abm.hoursInSimulation];
+        double[] firstFlush = new double[abm.hoursInSimulation];
+        double[] rainfallOverflow = new double[abm.hoursInSimulation];
+        double[] storageToMain = new double[abm.hoursInSimulation];
+        double[] totalDemand = new double[abm.hoursInSimulation];
+        for (int i = 0; i < abm.numberHouses; i++) {
+            for (int j = 0; j < abm.hoursInSimulation; j++) {
+                rainfallToTank[j] += this.households[i].rainfallToTankVolume[j];
+                firstFlush[j] += this.households[i].firstFlushDiversionVolume[j];
+                rainfallOverflow[j] += this.households[i].rainfallOverflowVolume[j];
+                storageToMain[j] += this.households[i].totalStorageVolumeToMainSystem[j];
+                totalDemand[j] += this.households[i].totalIrrigDemand[j];
+            }
+        }
+        try {
+
+            File file = new File(abm.allSellerInfoOutputFileName);
+            PrintWriter writer = new PrintWriter(file);
+            for (int i = 0; i < abm.hoursInSimulation; i++) {
+                writer.println(i + " Rainfall to Tank Volume = \t" + rainfallToTank[i]);
+            }
+            for (int i = 0; i < abm.hoursInSimulation; i++) {
+                writer.println(i + " First Flush Diversion Volume = \t" + firstFlush[i]);
+            }
+            for (int i = 0; i < abm.hoursInSimulation; i++) {
+                writer.println(i + " Rainfall Overflow Volume = \t" + rainfallOverflow[i]);
+            }
+            for (int i = 0; i < abm.hoursInSimulation; i++) {
+                writer.println(i + " Tank Level Beginning of Hour = \t");
+            }
+            for (int i = 0; i < abm.hoursInSimulation; i++) {
+                writer.println(i + " Storage Volume Beginning of Hour = \t");
+            }
+            for (int i = 0; i < abm.hoursInSimulation; i++) {
+                writer.println(i + " Total Storage Volume to Main System = \t" + storageToMain[i]);
+            }
+            for (int i = 0; i < abm.hoursInSimulation; i++) {
+                writer.println(i + " Total Demand of Households = \t" + totalDemand[i]);
             }
 
             writer.close();
@@ -542,53 +522,21 @@ public class market implements Steppable {
         }
     }
 
-    //
-    public void tallyFlow() {
-        double[] rainfallToTank = new double[this.hoursInMonth];
-        double[] firstFlush = new double[this.hoursInMonth];
-        double[] rainfallOverflow = new double[this.hoursInMonth];
-        double[] storageToMain = new double[this.hoursInMonth];
-        double[] totalDemand = new double[this.hoursInMonth];
-        for (int i = 0; i < this.numberHouses; i++) {
-            for (int j = 0; j < this.hoursInMonth; j++) {
-                rainfallToTank[j] += this.households[i].rainfallToTankVolume[j];
-                firstFlush[j] += this.households[i].firstFlushDiversionVolume[j];
-                rainfallOverflow[j] += this.households[i].rainfallOverflowVolume[j];
-                storageToMain[j] += this.households[i].totalStorageVolumeToMainSystem[j];
-                totalDemand[j] += this.households[i].totalDemand[j];
-            }
+    /* Calculate the total number of agents at each time step*/
+    public int[] getSummedList(int[] theList) {
+        int[] summedList = new int[theList.length];
+        int currentSum = 0;
+        for (int i = 0; i < theList.length; i++) {
+            currentSum = currentSum + theList[i];
+            summedList[i] = currentSum;
         }
-        try {
+        return summedList;
+    }
 
-            String fileName = "/Users/lizramsey/Documents/workspace/RWH/output/All Seller Information.txt";
-            File file = new File(fileName);
-            PrintWriter writer = new PrintWriter(file);
-            for (int i = 0; i < 744; i++) {
-                writer.println(i + " Rainfall to Tank Volume = \t" + rainfallToTank[i]);
-            }
-            for (int i = 0; i < 744; i++) {
-                writer.println(i + " First Flush Diversion Volume = \t" + firstFlush[i]);
-            }
-            for (int i = 0; i < 744; i++) {
-                writer.println(i + " Rainfall Overflow Volume = \t" + rainfallOverflow[i]);
-            }
-            for (int i = 0; i < 744; i++) {
-                writer.println(i + " Tank Level Beginning of Hour = \t");
-            }
-            for (int i = 0; i < 744; i++) {
-                writer.println(i + " Storage Volume Beginning of Hour = \t");
-            }
-            for (int i = 0; i < 744; i++) {
-                writer.println(i + " Total Storage Volume to Main System = \t" + storageToMain[i]);
-            }
-            for (int i = 0; i < 744; i++) {
-                writer.println(i + " Total Demand of Households = \t" + totalDemand[i]);
-            }
-
-            writer.close();
-        } catch (FileNotFoundException e) {
-
-        }
+    /* Set the sizes of final result arrays*/
+    public void setHistories() {
+        sellerHistory = new double[abm.numberHouses][abm.hoursInSimulation][3];
+        buyerHistory = new double[abm.numberHouses][abm.hoursInSimulation][2];
     }
 
 }
