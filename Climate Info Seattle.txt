@@ -1,0 +1,2 @@
+Monthly potential evapotranspiration (m/month):	0.075
+Effective Rainfall (m/month) (Jacob and Haarhofs, 2004):	0.02635
