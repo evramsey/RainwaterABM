@@ -16,6 +16,8 @@ public class marketABM extends SimState {
     public static double M3_TO_GAL_CONVERSION = 264.172;
     public static double FT3_TO_GAL_CONVERSION = 7.48052;
     public static int MINUTES_IN_HOUR = 60;
+    public static double INCH_TO_MM_CONVERSION = 25.4;
+    public static double MM_TO_M_CONVERSION = 0.001;
 
     /** Random number generator */
     public static MersenneTwisterFast rng = new MersenneTwisterFast();
@@ -37,16 +39,16 @@ public class marketABM extends SimState {
     /** Constants set by climate input file */
 
     /** Potential evapotranspiration [m/month] */
-    public double potEvapotranspiration;
+    public static double potEvapotranspiration;
     /** Effective rainfall [m] (Jacobs and Haarhofs, 2004) */
-    public double effectiveRainfall;
+    public static double effectiveRainfall;
 
     /** Variables updated by the model */
 
     /** Current hour of simulation */
     public static int currentHour = 0;
     /** Array of household agents*/
-    public static Household[] _households;
+    public static Household[] households;
     /** ArrayList of households with tanks */
     public static ArrayList<Household> prosumer_households = new ArrayList<>();
     /** ArrayList of households without tanks */
@@ -73,8 +75,8 @@ public class marketABM extends SimState {
         super.start();
         setHouseholds();
         setNodeIDs();
-        initializeClimateInfo();
         initializeRainfall();
+        initializeClimateInfo();
         initializeIrrigPattern();
         DataCollector dc = new DataCollector(nodalDemandOutputFileName, negativeDemandOutputFileName,
                 irrigationDemandOutputFileName, allSellerInfoOutputFileName);
@@ -135,7 +137,7 @@ public class marketABM extends SimState {
     public static void setNumHouses(String inFile) {
         int numLines = getNumberLines(inFile);
         numberHouses = numLines;
-        _households = new Household[numberHouses];
+        households = new Household[numberHouses];
     }
 
     /** Count and return the number of lines in a file
@@ -160,7 +162,6 @@ public class marketABM extends SimState {
 
     /** Initialize household agents from basic information text file */
     private void setHouseholds() {
-        //this._households = new Household[marketABM.numberHouses];
         File infoFile = new File(marketABM.basicInfoTextName);
         try {
             Scanner sc = new Scanner(infoFile);
@@ -181,7 +182,7 @@ public class marketABM extends SimState {
                 Household hh = new Household(index, hasTank, catchmentArea, tankDiameter, tankHeight, WTA, WTP,
                         lawnSize, irrigEfficiency, kCrop);
                 schedule.scheduleRepeating(hh);
-                _households[index] = hh;
+                households[index] = hh;
                 if (hasTank) {
                     prosumer_households.add(hh);
                 } else{
@@ -207,7 +208,7 @@ public class marketABM extends SimState {
                 String IRID = parts[0];
                 String NDID = parts[1];
                 String MSID = parts[2];
-                _households[index].setNodeTags(IRID, NDID, MSID);
+                households[index].setNodeTags(IRID, NDID, MSID);
                 index++;
             }
             sc.close();
@@ -226,21 +227,37 @@ public class marketABM extends SimState {
         }
     }
 
-    /** Initialize rainfall data for the simulation from input file */
+    /** Initialize rainfall data for the simulation from input file and calculate effective rainfall
+     * (Jacobs and Hoorhof, 2004)
+     * */
     private static void initializeRainfall(){
         File rainFile = new File(marketABM.rainfallDataFileName);
+        double rainSum = 0.0;
         try {
             Scanner sc = new Scanner(rainFile);
             sc.nextLine(); //skip header
             while (sc.hasNextLine()) {
                 String i = sc.nextLine();
                 String[] parts = i.split("\t");
-                rainfall.add(Double.parseDouble(parts[2]));
+                double rain = Double.parseDouble(parts[2]);
+                rainfall.add(rain);
+                rainSum += rain;
             }
             sc.close();
         } catch (FileNotFoundException e) {
             e.printStackTrace();
         }
+        double mmRainSum = rainSum * INCH_TO_MM_CONVERSION;
+        if (mmRainSum < 25){
+            effectiveRainfall = mmRainSum;
+        }
+        else if (mmRainSum > 25 & mmRainSum < 152){
+            effectiveRainfall = 0.504 * mmRainSum + 12.4;
+        }
+        else if (mmRainSum >= 152){
+            effectiveRainfall = 89.0;
+        }
+        effectiveRainfall = effectiveRainfall * MM_TO_M_CONVERSION;
     }
 
     private void initializeClimateInfo(){
@@ -249,8 +266,6 @@ public class marketABM extends SimState {
             Scanner sc = new Scanner(climateFile);
             String i = sc.nextLine();
             this.potEvapotranspiration = Double.parseDouble(i.split("\t")[1]);
-            i = sc.nextLine();
-            this.effectiveRainfall = Double.parseDouble(i.split("\t")[1]);
             sc.close();
         } catch (FileNotFoundException e) {
             e.printStackTrace();
@@ -278,38 +293,31 @@ public class marketABM extends SimState {
         }
         int[] sumIrrList = getSummedList(irrPattern);
         int hourIndex = 0;
-        int[] houseNumArray = IntStream.range(0, marketABM.consumer_households.size()).toArray();
+        int[] houseNumArray = IntStream.range(0, consumer_households.size()).toArray();
         int[] shuffledArray = shuffleArray(houseNumArray);
-        // generate demand patterns and assign them to randomly selected _households
-//        for (int i = 0; i < marketABM.numberHouses; ) {
-//
-//            while (i < sumIrrList[hourIndex]) {
-//                double[] thisDemand = new double[marketABM.hoursInSimulation];
-//                int mixedIndex = shuffledArray[i];
-//                // if agent doesn't have a tank, generate demand pattern; if it has a tank, assume zero demand
-//                if (!this._households[mixedIndex].hasTank) {
-//                    thisDemand = generateDemand(hourIndex, mixedIndex);
-//                }
-//                this._households[mixedIndex].setIrrigationDemand(thisDemand);
-//                i += 1;
-//            }
-//            hourIndex += 1;
-//        }
-        for (int i = 0; i < marketABM.consumer_households.size();){
+        // generate demand patterns and assign them to randomly selected households
+        for (int i = 0; i < consumer_households.size();){
             while (i < sumIrrList[hourIndex]) {
-                double[] thisDemand = new double[marketABM.hoursInSimulation];
+                double[] thisDemand;
                 int mixedIndex = shuffledArray[i];
                 thisDemand = generateDemand(hourIndex, mixedIndex);
-                this._households[mixedIndex].setIrrigationDemand(thisDemand);
+                consumer_households.get(mixedIndex).setIrrigationDemand(thisDemand);
                 i += 1;
             }
             hourIndex +=1;
         }
-        for (int i = 0; i < marketABM.prosumer_households.size(); i++){
-            double[] thisDemand = new double[marketABM.hoursInSimulation];
-            this._households[marketABM.consumer_households.size() + i].setIrrigationDemand(thisDemand);
+        for (int i = 0; i < prosumer_households.size(); i++){
+            double[] thisDemand = new double[hoursInSimulation];
+            prosumer_households.get(i).setIrrigationDemand(thisDemand);
         }
-
+        for (int i = 0; i < households.length; i++){
+            if (! households[i].hasTank){
+                double[] demandArray = households[i].irrigDemandPattern;
+                for (int j = 0; j < demandArray.length; j ++){
+                    System.out.print(demandArray[j] + ", ");
+                }
+            }
+        }
     }
 
 
@@ -321,8 +329,8 @@ public class marketABM extends SimState {
      */
     public double[] generateDemand(int hour, int houseID) {
         // Jacob and Haarhofs 2004 formula for average monthly daily demand
-        double dailyIrrigation = (this._households[houseID].lawnSize / this._households[houseID].irrigEfficiency) *
-                (((this._households[houseID].kCrop * this.potEvapotranspiration)
+        double dailyIrrigation = (this.households[houseID].lawnSize / this.households[houseID].irrigEfficiency) *
+                (((this.households[houseID].kCrop * this.potEvapotranspiration)
                         - this.effectiveRainfall) / marketABM.daysInSimulation);
         dailyIrrigation = dailyIrrigation * marketABM.M3_TO_GAL_CONVERSION; //convert from cubic meters to gallons
         double irrigDemand[] = new double[marketABM.hoursInSimulation];
@@ -364,8 +372,3 @@ public class marketABM extends SimState {
         return summedList;
     }
 }
-
-
-
-  
-  
