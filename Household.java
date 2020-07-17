@@ -31,18 +31,16 @@ public class Household implements Steppable{
     public double irrigEfficiency;
     /** Lawn crop coefficient */
     public double kCrop;
-
     /** EPANET Node ID for household negative demand node */
     public String negativeDemandNodeID;
     /** EPANET Node ID for household irrigation demand node */
     public String irrigationDemandNodeID;
     /** EPANET Node ID for household main system node */
     public String mainSystemNodeID;
-
     /** Agent's irrigation demand at each time step [gal] */
     public double[] irrigDemandPattern;
 
-    /**Variables changed by the model throughout simulation*/
+    /**-----Variables changed by the model throughout simulation-----*/
 
     /** Current amount of water in agent's tank [gal] */
     public double currentTankStorageVolume;
@@ -56,7 +54,7 @@ public class Household implements Steppable{
     public double amountFlushed = 0;
 
 
-    /** Variables to change as needed */
+    /** -----Variables to change as needed----- */
 
 
     /** First flush volume requirement for water quality concerns*/
@@ -103,7 +101,7 @@ public class Household implements Steppable{
 
     public void step(SimState state) {
         this.currentNegativeDemand = 0; // reset the amount of water to put in the system this hour
-        this.currentStartIrrigDemand = this.irrigDemandPattern[marketABM.currentHour];  //the amount needed at beginning of time step (goes into EPANet)
+        this.currentStartIrrigDemand = getCurrentStartIrrigDemand();  //the amount needed at beginning of time step (goes into EPANet)
         this.currentEndIrrigDemand = this.currentStartIrrigDemand;      //the amount needed by the end of the time step
         double rain = marketABM.rainfall.get(marketABM.currentHour);    //the amount of rain falling this hour
         if (this.hasTank & rain > 0) {
@@ -151,13 +149,15 @@ public class Household implements Steppable{
         }
     }
 
-    /** Shuffle an array
-     * @param houseArray     array to shuffle
-     */
-    public static ArrayList<Household> shuffleHouses(ArrayList<Household> houseArray) {
-        ArrayList<Household> arrayCopy = new ArrayList<Household>(houseArray);
-        Collections.shuffle(arrayCopy);
-        return arrayCopy;
+    public double getCurrentStartIrrigDemand(){
+        double demand;
+        if ((marketABM.hoursSinceRain >= marketABM.rainTradeGap)) {
+            demand = this.irrigDemandPattern[marketABM.currentHour];
+        }
+        else{
+            demand = 0.0;
+        }
+        return demand;
     }
 
     public boolean shouldFlush(){
@@ -165,7 +165,7 @@ public class Household implements Steppable{
         if (marketABM.hoursSinceRain >= numHoursForFlushDiversion) {
             //if so, reset the amount flushed to zero
             this.amountFlushed = 0;
-            // return that should flush
+            // agent should flush
             return true;
         }
         else {
@@ -191,5 +191,13 @@ public class Household implements Steppable{
             this.amountFlushed = this.flushDiversionVolume;
         }
     }
-}
 
+    /** Shuffle an array
+     * @param houseArray     array to shuffle
+     */
+    public static ArrayList<Household> shuffleHouses(ArrayList<Household> houseArray) {
+        ArrayList<Household> arrayCopy = new ArrayList<Household>(houseArray);
+        Collections.shuffle(arrayCopy);
+        return arrayCopy;
+    }
+}
