@@ -2,7 +2,6 @@ package rwh;
 
 import sim.engine.SimState;
 import sim.engine.Steppable;
-
 import java.io.File;
 import java.io.FileWriter;
 
@@ -50,7 +49,13 @@ public class DataCollector implements Steppable {
             demandString = this.nodalDemandOutput;
         }
         try{
-            File file = new File(fileName);
+            File file=new File(fileName);
+            String dir = file.getParent();
+            File dirFile = new File(dir);
+
+            if(!dirFile.exists()){
+                dirFile.mkdirs();
+            }
             FileWriter writer = new FileWriter(file);
             writer.write(demandString);
             writer.flush();
@@ -66,7 +71,7 @@ public class DataCollector implements Steppable {
     public void printIrrigDemands(){
         String s = marketABM.currentHour + "\t";
         for (int i = 0; i < marketABM.numberHouses; i++) {
-            s += (marketABM._households[i].currentStartIrrigDemand/marketABM.MINUTES_IN_HOUR) + "\t";
+            s += (marketABM.households[i].currentStartIrrigDemand/marketABM.MINUTES_IN_HOUR) + "\t";
             }
         this.irrigationDemandOutput += s + "\n";
     }
@@ -74,7 +79,7 @@ public class DataCollector implements Steppable {
     public void printNegativeDemands(){
         String s = marketABM.currentHour + "\t";
         for (int i = 0; i < marketABM.numberHouses; i++) {
-            s += (marketABM._households[i].currentNegativeDemand/marketABM.MINUTES_IN_HOUR) + "\t";
+            s += (marketABM.households[i].currentNegativeDemand/marketABM.MINUTES_IN_HOUR) + "\t";
         }
         this.negativeDemandOutput += s + "\n";
     }
@@ -82,7 +87,7 @@ public class DataCollector implements Steppable {
     public void printHeader(){
         String s = "Time step\t";
         for (int i = 0; i < marketABM.numberHouses; i ++){
-            String houseID = marketABM._households[i].mainSystemNodeID;
+            String houseID = marketABM.households[i].mainSystemNodeID;
             s += houseID + "\t";
         }
         this.irrigationDemandOutput += s + "\n";
